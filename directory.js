@@ -225,3 +225,5 @@ Directory.prototype.constructor = Directory;
 
 
 }).call(Directory.prototype);
+
+module.exports = Directory;
