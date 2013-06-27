@@ -1,9 +1,11 @@
 var Bucket = require('./bucket');
+var uuid = require('node-uuid');
 
 function Path(path) {
     var np = this.normalize(path);
     this.path = np.path;
     this.nodes = np.nodes;
+    this.name = np.nodes[np.nodes.length - 1];
 }
 
 (function() {
@@ -13,13 +15,13 @@ function Path(path) {
             path = '/' + path;
         }
         var nodes = path.split('/');
-        nodes[0] = 'root';
+        nodes[0] = '__root__';
         return {path: path, nodes: nodes};
     };
 
     this.parentOf = function () {
         if (this.nodes.length > 1) {
-            return new Path('/' + this.nodes.slice(-1).join('/'));
+            return new Path('/' + this.nodes.slice(1, -1).join('/'));
         }
     };
  
@@ -27,38 +29,57 @@ function Path(path) {
 
 function Directory(name) {
     Bucket.call(this, name);
+    this.atomic(function (done) {
+        console.log("got a lock");
+        this.get('directory', function (err, dir) {
+            console.log(dir);
+            var key;
+            if (err || !dir) {
+                key = 'node:' + uuid();
+                dir = {'/': key};
+                this.put(key, {name: '__root__', 'path': '/', children: []}, function (err) {
+                    this.put('directory', dir, function (err) {
+                        done();
+                    });
+                }.bind(this));
+            } else {
+                done();
+            }
+        }.bind(this));
+    });
     /* node:/path/name
      * { name: xxxx, path, children: [{name, type, key}]}
-     *  
-     *
-     *
-     *
-     *
      */
 
 }
 
+Directory.prototype = Object.create(Bucket.prototype);
+Directory.prototype.constructor = Directory;
+//Directory.prototype.constructor = Directory;
+
 (function() {
 
-    function getDirectoryIndex(cb) {
-        this.lup.get('directory', {valueEncoding: 'msgpack'}, function (err, dir) {
-            if (err || !dir) {
-                dir = {};
-            }
-            cb(dir);
-        });
-    }
 
     this.mkdir = function(path, cb) {
-        this.lock.runwithlock(function () {
-            getDirectoryIndex(function (dir) {
-                if (dir.hasOwnProperty(path)) {
-                    cb("Already Exists");
+        path = new Path(path);
+        this.atomic(function (done) {
+            this.get('directory', function (err, dir) {
+                var key;
+                if (dir.hasOwnProperty(path.path)) {
+                    done("Already exists.");
+                } else if (!dir.hasOwnProperty(path.parentOf().path)) {
+                    done("Parent does not exist.");
                 } else {
-                    dir = 1
+                    key = 'node:' + uuid();
+                    this.put(key, {name: path.name, path: path.path, children: []}, function (err) {
+                        dir[path.path] = key;
+                        this.put('directory', dir, function (err) {
+                            done(err);
+                        });
+                    }.bind(this));
                 }
-            });
-        });
+            }.bind(this));
+        }, cb);
     };
 
     this.hasChild = function (name, type) {
@@ -98,3 +119,8 @@ function Directory(name) {
 
 
 }).call(Directory.prototype);
+
+//setTimeout(function() {console.log('10 seconds');}, 10000);
+var d = new Directory('thingy');
+d.mkdir('/hey', function () {console.log("done", arguments);});
+d.get('directory', function () {console.log(arguments)});

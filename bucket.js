@@ -10,7 +10,7 @@ var Bucket = function (name, options) {
     this.options = options || {};
     this.options.valueEncoding = 'msgpack';
     if (!this.options.location) {
-        this.options.location = './' + this.name;
+        this.options.location = __dirname + '/stores/' + this.name;
     }
     if (this.options.inMemory === true) {
         this.lup = levelup(this.options.location, {
@@ -170,29 +170,30 @@ var Bucket = function (name, options) {
         this.lock.runwithlock(update, [key, updater, function () { this.lock.release(); callback.apply(this, arguments); }.bind(this)], this);
     };
 
-    var bucket = this;
-    console.log(bucket);
 
-    this.unatomic = {
-        keyFilter: keyFilter.bind(bucket),
-        getKeys: getKeys.bind(bucket),
-        mapReduce: mapReduce.bind(bucket),
-        put: function() { bucket.lup.put.apply(bucket.lup, arguments); },
-        get: function() { bucket.lup.get.apply(bucket.lup, arguments); },
-        del: function() { bucket.lup.del.apply(bucket.lup, arguments); },
-        batch: function() { bucket.lup.batch.apply(bucket.lup, arguments); },
-        update: update.bind(bucket)
-    }
     
     this.atomic = function (atomic_function, cb) {
-        this.lock.acquire(function () {
-            atomic_function.call(this.unatomic, function () {
+        var unatomic = {
+            keyFilter: keyFilter,
+            getKeys: getKeys,
+            mapReduce: mapReduce,
+            put: this.lup.put.bind(this.lup),
+            get: this.lup.get.bind(this.lup),
+            put: this.lup.put.bind(this.lup),
+            batch: this.lup.batch.bind(this.lup),
+            update: update
+        }
+        this.lock.runwithlock(function () {
+            atomic_function.call(unatomic, function () {
                 this.lock.release();
-                cb.apply(this, arguments);
-            });
+                if(cb) {
+                    cb.apply(this, arguments);
+                }
+            }.bind(this));
         }, [], this);
     };
 
-}).apply(Bucket.prototype);
+}).call(Bucket.prototype);
 
 module.exports = Bucket;
+
