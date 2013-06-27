@@ -27,8 +27,8 @@ function Path(path) {
  
 }).call(Path.prototype);
 
-function Directory(name) {
-    Bucket.call(this, name);
+function Directory(name, options) {
+    Bucket.call(this, name, options);
     this.atomic(function (done) {
         this.get('directory', function (err, dir) {
             var key;
@@ -225,12 +225,3 @@ Directory.prototype.constructor = Directory;
 
 
 }).call(Directory.prototype);
-
-var d = new Directory('thingy');
-d.mkdir('/hey', function () {console.log("done", arguments);});
-d.get('directory', function () {console.log(arguments)});
-d.write('/hey/derp.obj', 'msg', {subject: 'This is a secret message.', body: 'Pssst! Secret!'}, function (err) {
-    d.read('/hey/derp.obj', 'msg', function (err, obj) {
-        console.log(err, obj);
-    });
-});

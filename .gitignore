@@ -7,6 +7,9 @@ lib-cov
 *.pid
 *.gz
 stores/*
+*.swp
+*.swo
+node_modules
 
 pids
 logs
