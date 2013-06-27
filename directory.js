@@ -30,9 +30,7 @@ function Path(path) {
 function Directory(name) {
     Bucket.call(this, name);
     this.atomic(function (done) {
-        console.log("got a lock");
         this.get('directory', function (err, dir) {
-            console.log(dir);
             var key;
             if (err || !dir) {
                 key = 'node:' + uuid();
@@ -48,17 +46,15 @@ function Directory(name) {
         }.bind(this));
     });
     /* node:/path/name
-     * { name: xxxx, path, children: [{name, type, key}]}
+     * { name: xxxx, path, children[type][name]: key}
      */
 
 }
 
 Directory.prototype = Object.create(Bucket.prototype);
 Directory.prototype.constructor = Directory;
-//Directory.prototype.constructor = Directory;
 
 (function() {
-
 
     this.mkdir = function(path, cb) {
         path = new Path(path);
@@ -71,7 +67,7 @@ Directory.prototype.constructor = Directory;
                     done("Parent does not exist.");
                 } else {
                     key = 'node:' + uuid();
-                    this.put(key, {name: path.name, path: path.path, children: []}, function (err) {
+                    this.put(key, {name: path.name, path: path.path, children: {}}, function (err) {
                         dir[path.path] = key;
                         this.put('directory', dir, function (err) {
                             done(err);
@@ -82,7 +78,7 @@ Directory.prototype.constructor = Directory;
         }, cb);
     };
 
-    this.hasChild = function (name, type) {
+    this.hasObject = function (name, type) {
     };
 
     this.getRoot = function () {
@@ -96,22 +92,98 @@ Directory.prototype.constructor = Directory;
         }
     };
 
-    this.exists = function(path, cb) {
+    this.objExists = function(path, type, cb) {
     };
 
     this.rmdir = function(path, cb) {
     };
 
-    this.move = function (start, end, cb) {
+    this.moveDir = function (start, end, cb) {
+        start = new Path(start);
+        end = new Path(end);
+        this.atomic(function (done) {
+            this.get('directory', function (err, dir) {
+                var dirname;
+                var changelist = [];
+                var didx;
+                if (!dir.hasOwnProperty(start.path)) {
+                    done("Starting not found.");
+                } else if (dir.hasOwnProperty(end.path)) {
+                    done("Ending path already exists.");
+                } else {
+                    for (dirname in dir) {
+                        if (dirname.slice(0, start.path.length) === start.path) {
+                            changelist.push(dirname);
+                        }
+                    }
+                    for (didx in changelist) {
+                        dir[end.path + changelist[didx].slice(start.path.length)] = dir[changelist[didx]];
+                        delete dir[changelist[didx]];
+                    }
+                    this.write('directory', dir, function (err) {
+                        done(err);
+                    });
+                }
+            }.bind(this));
+        }, cb);
+    };
+    
+    this.moveObject = function (start, type, end, cb) {
+        start = new Path(start);
+        var start_parent = start.parentOf();
+        end = new Path(end);
+        var end_parent = end.parentOf();
     };
 
     this.write = function (path, type, data, cb) {
+        var path = new Path(path);
+        var parent = path.parentOf();
+        this.atomic(function (done) {
+            this.get('directory', function (err, dir) {
+                if (!dir.hasOwnProperty(parent.path)) {
+                    done("Directory not found.");
+                } else {
+                    this.get(dir[parent.path], function (err, node) {
+                        var key;
+                        if (!node.children.hasOwnProperty(type)) node.children[type] = {};
+                        if (!node.children[type].hasOwnProperty(path.name)) {
+                            key = 'object:' + uuid();
+                            node.children[type][path.name] = key;
+                        }
+                        this.put(dir[parent.path], node, function (err) {
+                            this.put(key, data, function (err) {
+                                done(false, key);
+                            });
+                        }.bind(this));
+                    }.bind(this));
+                }
+            }.bind(this));
+        }, cb);
     };
 
     this.touch = function (path, type, cb) {
     };
 
     this.read = function (path, type, cb) {
+        var path = new Path(path);
+        var parent = path.parentOf();
+        this.atomic(function (done) {
+            this.get('directory', function (err, dir) {
+                if (!dir.hasOwnProperty(parent.path)) {
+                    done("Directory not found.");
+                } else {
+                    this.get(dir[parent.path], function (err, node) {
+                        if (node.children.hasOwnProperty(type) && node.children[type].hasOwnProperty(path.name)) {
+                            this.get(node.children[type][path.name], function (err, obj) {
+                                done(err, obj);
+                            });
+                        } else {
+                            done("Object not found.");
+                        }
+                    }.bind(this));
+                }
+            }.bind(this));
+        }, cb);
     };
 
     this.getMany = function (pattern, type, cb) {
@@ -120,7 +192,11 @@ Directory.prototype.constructor = Directory;
 
 }).call(Directory.prototype);
 
-//setTimeout(function() {console.log('10 seconds');}, 10000);
 var d = new Directory('thingy');
 d.mkdir('/hey', function () {console.log("done", arguments);});
 d.get('directory', function () {console.log(arguments)});
+d.write('/hey/derp.obj', 'msg', {subject: 'This is a secret message.', body: 'Pssst! Secret!'}, function (err) {
+    d.read('/hey/derp.obj', 'msg', function (err, obj) {
+        console.log(err, obj);
+    });
+});

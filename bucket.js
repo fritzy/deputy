@@ -14,11 +14,12 @@ var Bucket = function (name, options) {
     }
     if (this.options.inMemory === true) {
         this.lup = levelup(this.options.location, {
-            db: memdown_factory
+            db: memdown_factory,
+            valueEncoding: 'msgpack',
         });
     } else {
         this.lup = levelup(this.options.location, {
-            valueEncoding: 'msgpack'
+            valueEncoding: 'msgpack',
         });
     };
     this.lock = new Padlock();
