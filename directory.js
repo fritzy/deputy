@@ -133,6 +133,40 @@ Directory.prototype.constructor = Directory;
         var start_parent = start.parentOf();
         end = new Path(end);
         var end_parent = end.parentOf();
+        this.atomic(function (done) {
+            this.get('directory', function (err, dir) {
+                if (!dir.hasOwnProperty(start_parent.path)) {
+                    done("Starting directory doesn't exist.");
+                } else if (!dir.hasOwnProperty(end_parent.path)) {
+                    done("Ending directory doesn't exist.");
+                } else {
+                    this.get(dir[start_parent.path], function (err, start_node) {
+                        if (!start_node.children.hasOwnProperty(type) || !start_node.children[type].hasOwnProperty(start.name)) {
+                            done("Object not found.");
+                        } else {
+                            this.get(dir[end_parent.path], function(err, end_node) {
+                                if (end_node.children.hasOwnProperty(type) && end_node.children[type].hasOwnProperty(end.name)) {
+                                    done("End object already exists.");
+                                } else {
+                                    if (!end_node.children.hasOwnProperty(type)) end_node.children[type] = {};
+                                    end_node.children[type][end_path.name] = start_node.children[type][start_path.name];
+                                    delete start_node.children[type][start_path.name];
+                                    this.put(dir[start_parent.path], start_node, function (err) {
+                                        if (err) {
+                                            done(err);
+                                        } else {
+                                            this.put(dir[end_parent.path], end_node, function (err) {
+                                                done(err);
+                                            });
+                                        }
+                                    }.bind(this));
+                                }
+                            }.bind(this));
+                        }
+                    }.bind(this));
+                }
+            }.bind(this));
+        }, cb);
     };
 
     this.write = function (path, type, data, cb) {
