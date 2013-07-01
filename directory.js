@@ -56,7 +56,7 @@ Directory.prototype.constructor = Directory;
 
 (function() {
 
-    this.mkdir = function(path, cb) {
+    this.makeDir = function(path, cb) {
         path = new Path(path);
         this.atomic(function (done) {
             this.get('directory', function (err, dir) {
