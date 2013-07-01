@@ -3,30 +3,36 @@ var memdown_factory = function (location) { return new memdown(location); };
 var levelup         = require('levelup');
 var async           = require('async');
 var Padlock         = require('padlock').Padlock;
-var msgpack         = require('msgpack');
+//var msgpack         = require('msgpack');
 
 var Bucket = function (name, options) {
     this.name = name;
     this.options = options || {};
-    this.options.valueEncoding = 'msgpack';
+    this.options.valueEncoding = 'json';
     if (!this.options.location) {
         this.options.location = __dirname + '/stores/' + this.name;
     }
     if (this.options.inMemory === true) {
         this.lup = levelup(this.options.location, {
             db: memdown_factory,
-            valueEncoding: 'msgpack',
+            valueEncoding: 'json',
         });
     } else {
         this.lup = levelup(this.options.location, {
-            valueEncoding: 'msgpack',
+            valueEncoding: 'json',
         });
     };
     this.lock = new Padlock();
 };
 
 (function () {
-
+    
+    /* keyFilter
+     * filter function ({key, data}) { return boolean }
+     *
+     * Calls filter with each key-value in the bucket.
+     * Return true to keep the key in the results
+     */
     function keyFilter(filter, cb) {
         var keys = [];
         var key_stream = this.lup.createReadStream({keys: true, values: true});
@@ -44,6 +50,10 @@ var Bucket = function (name, options) {
         this.lock.runwithlock(keyFilter, [filter, function () { this.lock.release(); cb.apply(this, arguments); }.bind(this)], this);
     };
     
+    /* getKeys
+     * [key1, key2, ...]
+     * callback
+     */
     function getKeys(keys, cb) {
         var results = {};
         async.forEach(keys, function (item, callback) {
@@ -108,10 +118,10 @@ var Bucket = function (name, options) {
             if (typeof args.batch === 'function') {
                 batch = args.batch(results);
                 this.lup.batch(batch, function (err) {
-                    cb(err, results);
+                    callback(err, results);
                 });
             } else {
-                cb(false, results);
+                callback(false, results);
             }
         }
         //if we have keys
@@ -144,7 +154,6 @@ var Bucket = function (name, options) {
         }.bind(this)], this.lup);
     };
 
-
     this.get = function (key, callback) {
         this.lock.runwithlock(this.lup.get, [key, {}, function (err, result) {
             this.lock.release();
@@ -159,7 +168,6 @@ var Bucket = function (name, options) {
         }.bind(this)], this.lup);
     };
 
-
     function update(key, updater, cb) {
         updater(result, function (newvalue) {
             this.lup.put(key, newvalue, function (err) {
@@ -170,9 +178,10 @@ var Bucket = function (name, options) {
     this.update = function (key, updater, cb) {
         this.lock.runwithlock(update, [key, updater, function () { this.lock.release(); callback.apply(this, arguments); }.bind(this)], this);
     };
-
-
     
+    /* atomic
+     * Pass a function that you'd like to be atomic. A "done" function
+     */
     this.atomic = function (atomic_function, cb) {
         var unatomic = {
             keyFilter: keyFilter,

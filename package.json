@@ -12,7 +12,8 @@
     "levelup": "*",
     "async": "*",
     "padlock": "*",
-    "msgpack": "*"
+    "msgpack": "*",
+    "nodeunit": "*"
   },
   "scripts": {
     "test": "node tests/test.js"
