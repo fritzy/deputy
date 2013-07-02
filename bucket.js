@@ -172,6 +172,7 @@ var Bucket = function (name, options) {
         updater(result, function (newvalue) {
             this.lup.put(key, newvalue, function (err) {
                 this.lock.release();
+                cb(err)
             });
         });
     }
