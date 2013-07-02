@@ -5,6 +5,61 @@ var async           = require('async');
 var Padlock         = require('padlock').Padlock;
 //var msgpack         = require('msgpack');
 
+
+var Index = function (name, bucket) {
+    this.name = name;
+    this.bucket = bucket;
+    this.lookups = {};
+    this.loaded = false;
+    this.up = null;
+};
+
+(function () {
+
+    this.load = function (cb) {
+        this.up = levelup(__dirname + '/indexes', {valueEncoding: 'json'});
+        this.up.get(this.name, function (err, result) {
+            this.lookups = result;
+            this.loaded = true;
+            cb(err);
+        });
+    };
+
+    this.unload = function (cb) {
+        this.up.close(function (err) {
+            this.lookups = {};
+            this.loaded = false;
+            cb(err);
+        });
+    };
+
+    this.get = function (lookup) {
+        return this.lookups[lookup] || [];
+    };
+
+    this.put = function (lookup, key, cb) {
+        if (!this.lookups.hasOwnProperty(lookup)) this.lookups[lookup] = [];
+        this.lookups[lookup].push(key);
+        this.up.put(this.name, this.lookups, cb);
+    };
+
+    this.del = function (lookup, key, cb) {
+        var idx;
+        if (!this.lookups.hasOwnProperty(lookup)) {
+            cb('no lookup');
+        } else {
+            idx = this.lookups[lookup].find(key);
+            if (idx === -1) {
+                cb('key not in index');
+            } else {
+                this.lookups[lookup].splice(idx, 1);
+                this.up.put(this.name, this.lookups, cb);
+            }
+        }
+    };
+
+}).call(Index.prototype);
+
 var Bucket = function (name, options) {
     this.name = name;
     this.options = options || {};
@@ -23,9 +78,22 @@ var Bucket = function (name, options) {
         });
     };
     this.lock = new Padlock();
+    this.index = {};
 };
 
 (function () {
+
+    this.loadIndex = function (name, cb) {
+        this.index[name] = new Index(name, this);
+        this.index[name].load(cb);
+    };
+
+    this.unloadIndex = function (name, cb) {
+        this.index[name].unload(function (err) {
+            delete this.index[name];
+            cb(err);
+        });
+    };
     
     /* keyFilter
      * filter function ({key, data}) { return boolean }
