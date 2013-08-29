@@ -1,5 +1,6 @@
 var Bucket = require('./bucket');
 var uuid = require('node-uuid');
+var async = require('async');
 
 function Path(path) {
     var np = this.normalize(path);
@@ -11,6 +12,9 @@ function Path(path) {
 (function() {
 
     this.normalize = function (path) {
+        if (path === '/') {
+            return {path: '/', nodes: ['__root__']};
+        }
         if (path.length === 0 || path[0] != '/') {
             path = '/' + path;
         }
@@ -29,25 +33,20 @@ function Path(path) {
 
 function Directory(name, options) {
     Bucket.call(this, name, options);
+    var dirinst = this;
     this.atomic(function (done) {
-        this.get('directory', function (err, dir) {
+        this.get('dir:__root__', function (err, dir) {
             var key;
             if (err || !dir) {
-                key = 'node:' + uuid();
-                dir = {'/': key};
-                this.put(key, {name: '__root__', 'path': '/', children: []}, function (err) {
-                    this.put('directory', dir, function (err) {
-                        done();
-                    });
-                }.bind(this));
+                console.log("overriding root", err, dirinst.options);
+                this.put('dir:__root__', {'path': '/', children: {}, subdirs: {}}, function (err) {
+                    done();
+                });
             } else {
                 done();
             }
         }.bind(this));
     });
-    /* node:/path/name
-     * { name: xxxx, path, children[type][name]: key}
-     */
 
 }
 
@@ -56,26 +55,68 @@ Directory.prototype.constructor = Directory;
 
 (function() {
 
-    this.makeDir = function(path, cb) {
+    this.traverse = function (atomic, path, cb) {
+        var curdir;
+        if (path.name === '__root__') {
+            atomic.get('dir:__root__', function (err, dir) {
+                cb(err, dir, 'dir:__root__', path);
+            });
+        } else {
+            async.reduce(path.nodes.slice(1), {nextkey: 'dir:__root__'}, function (state, node, acb) {
+
+                atomic.get(state.nextkey, function (err, dir) {
+                    state.dir = dir;
+                    if (dir.subdirs.hasOwnProperty(node)) {
+                        state.nextkey = dir.subdirs[node];
+                        acb(false, state);
+                    } else {
+                        acb("Path not found");
+                    }
+                }.bind(this));
+            }.bind(this), function (err, state) {
+                if (!err) {
+                    atomic.get(state.nextkey, function (err, dir) {
+                        cb(err, dir, state.nextkey);
+                    });
+                } else {
+                    cb(err);
+                }
+            });
+        }
+    };
+
+    this.getDir = function (path, cb) {
+        var dirinst = this;
         path = new Path(path);
         this.atomic(function (done) {
-            this.get('directory', function (err, dir) {
-                var key;
-                if (dir.hasOwnProperty(path.path)) {
-                    done("Already exists.");
-                } else if (!dir.hasOwnProperty(path.parentOf().path)) {
-                    done("Parent does not exist.");
+            dirinst.traverse(this, path, done);
+        }, cb);
+    };
+
+    this.makeDir = function(path, cb) {
+        var path = new Path(path);
+        var dirinst = this;
+        this.atomic(function (done) {
+            dirinst.traverse(this, path.parentOf(), function (err, dir, dirkey, parent) {
+                if (err) {
+                    done(err);
                 } else {
-                    key = 'node:' + uuid();
-                    this.put(key, {name: path.name, path: path.path, children: {}}, function (err) {
-                        dir[path.path] = key;
-                        this.put('directory', dir, function (err) {
-                            done(err);
-                        });
-                    }.bind(this));
+                    if (dir.subdirs.hasOwnProperty(path.nodes.slice(-1)[0])) {
+                        done("Already exists.");
+                    } else {
+                        var key = 'dir:' + uuid();
+                        this.put(key, {path: path.path, children: {}, subdirs: {}}, function (err) {
+                            dir.subdirs[path.nodes.slice(-1)[0]] = key;
+                            this.put(dirkey, dir, function (err) {
+                                done(err, key);
+                            });
+                        }.bind(this));
+                    }
                 }
             }.bind(this));
-        }, cb);
+        }, function (err, key) {
+            cb(err, key);
+        });
     };
 
     this.hasObject = function (name, type) {
@@ -86,10 +127,8 @@ Directory.prototype.constructor = Directory;
     };
 
     this.direxists = function(path, cb) {
-        var nodes = path.split('/');
-        for (nidx in nodes) {
-            
-        }
+        var path = new Path(path);
+        this.traverse(path, cb);
     };
 
     this.objExists = function(path, type, cb) {
@@ -98,6 +137,7 @@ Directory.prototype.constructor = Directory;
     this.rmdir = function(path, cb) {
     };
 
+    /*
     this.moveDir = function (start, end, cb) {
         start = new Path(start);
         end = new Path(end);
@@ -168,56 +208,97 @@ Directory.prototype.constructor = Directory;
             }.bind(this));
         }, cb);
     };
+    */
 
-    this.write = function (path, type, data, cb) {
+    this.write = function (path, type, name, data, cb) {
         var path = new Path(path);
-        var parent = path.parentOf();
+        var dirinst = this;
         this.atomic(function (done) {
-            this.get('directory', function (err, dir) {
-                if (!dir.hasOwnProperty(parent.path)) {
+            dirinst.traverse(this, path, function (err, dir, dirkey) {
+                if (err || !dir) {
                     done("Directory not found.");
                 } else {
-                    this.get(dir[parent.path], function (err, node) {
-                        var key;
-                        if (!node.children.hasOwnProperty(type)) node.children[type] = {};
-                        if (!node.children[type].hasOwnProperty(path.name)) {
-                            key = 'object:' + uuid();
-                            node.children[type][path.name] = key;
-                        }
-                        this.put(dir[parent.path], node, function (err) {
-                            this.put(key, data, function (err) {
-                                done(false, key);
-                            });
-                        }.bind(this));
+                    var key;
+                    if (!dir.children.hasOwnProperty(type)) dir.children[type] = {};
+                    if (!dir.children[type].hasOwnProperty(name)) {
+                        key = 'object:' + type + ':' + uuid();
+                        dir.children[type][name] = key;
+                    }
+                    this.put(dirkey, dir, function (err) {
+                        this.put(key, data, function (err) {
+                            done(false, key);
+                        });
                     }.bind(this));
                 }
             }.bind(this));
         }, cb);
     };
+
 
     this.touch = function (path, type, cb) {
     };
 
-    this.read = function (path, type, cb) {
+    this.read = function (path, type, name, cb) {
         var path = new Path(path);
-        var parent = path.parentOf();
+        var dirinst = this;
+        console.log(path);
         this.atomic(function (done) {
-            this.get('directory', function (err, dir) {
-                if (!dir.hasOwnProperty(parent.path)) {
+            dirinst.traverse(this, path, function (err, dir, dirkey) {
+                if (err || !dir) {
                     done("Directory not found.");
                 } else {
-                    this.get(dir[parent.path], function (err, node) {
-                        if (node.children.hasOwnProperty(type) && node.children[type].hasOwnProperty(path.name)) {
-                            this.get(node.children[type][path.name], function (err, obj) {
-                                done(err, obj);
-                            });
-                        } else {
-                            done("Object not found.");
-                        }
-                    }.bind(this));
+                    if (dir.children.hasOwnProperty(type) && dir.children[type].hasOwnProperty(name)) {
+                        this.get(dir.children[type][name], function (err, obj) {
+                            done(err, obj);
+                        });
+                    } else {
+                        done("Object not found.");
+                    }
                 }
             }.bind(this));
         }, cb);
+    };
+
+    this.list = function (path, type, offset, limit, cb) {
+        offset = offset || 0;
+        limit = limit || 50;
+        var path = new Path(path);
+        this.atomic(function (done) {
+            this.traverse(path, function (err, dir, dirkey) {
+                if(err || !dir) {
+                    done("Path not found.");
+                } else {
+                    if (dir.children.hasOwnProperty(type)) {
+                        var items = Object.keys(dir.children[type]);
+                        var length = items.length;
+                        items.sort();
+                        items = items.slice(offset, limit);
+                        done(false, {offset: offset, limit: limit, total: total, type: type, items: items});
+                    } else {
+                        done(false, {offset: offset, limit: limit, total: 0, type: type, items: []});
+                    }
+                }
+            }.bind(this));
+        }.bind(this), cb);
+    };
+
+    this.getKeys = function (path, type, cb) {
+        var path = new Path(path);
+        this.traverse(path, function (err, dir, dirkey) {
+            if(err || !dir) {
+                done("Path not found.");
+            } else {
+                if (dir.children.hasOwnProperty(type)) {
+                    var values = [];
+                    for (var iname in dir.children[type]) {
+                        values.push(dir.children[type][iname]);
+                    }
+                    cb(false, values);
+                } else {
+                    cb(false, []);
+                }
+            }
+        }.bind(this));
     };
 
     this.getMany = function (pattern, type, cb) {

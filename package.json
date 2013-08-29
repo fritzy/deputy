@@ -1,6 +1,6 @@
 {
-  "name": "deputy",
-  "version": "0.1.0",
+  "name": "deputydb",
+  "version": "0.1.6",
   "homepage": "https://github.com/fritzy/deputy",
   "repository": {
     "type": "git",
@@ -8,6 +8,7 @@
   },
   "description": "Map-Reduce Buckets and Directory Queries for Leveldb",
   "dependencies": {
+    "leveldown": "*",
     "memdown": "*",
     "levelup": "*",
     "async": "*",

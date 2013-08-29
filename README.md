@@ -20,7 +20,7 @@ Directories build on that with directory nodes that provide key-sets within itse
 
 ### get
 
-    arguements (
+    arguments (
         key,
         function callback(err, value)
     )
@@ -46,7 +46,14 @@ Directories build on that with directory nodes that provide key-sets within itse
         function updater(result, cb),
         function callback(err)
     )
-        
+
+
+    // somekey: {description: 'this is a counter', counter: 1}
+    deputy.update('somekey', function(value, done) {
+        value.counter += 1;
+        done(value);
+    });
+    // somekey: {description: 'this is a counter', counter: 2}
 
 ### keyFilter
 
@@ -54,6 +61,7 @@ Directories build on that with directory nodes that provide key-sets within itse
         function filter({key, data}) { return boolean },
         function callback(err, keys)
     )
+
 
 Calls filter with each key-value in the bucket.
 Return true to keep the key in the results
