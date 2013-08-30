@@ -15,6 +15,9 @@ function Path(path) {
         if (path === '/') {
             return {path: '/', nodes: ['__root__']};
         }
+        if (path.substr(-1) === '/') {
+            path = path.substr(0, path.length - 1);
+        }
         if (path.length === 0 || path[0] != '/') {
             path = '/' + path;
         }
@@ -93,6 +96,32 @@ Directory.prototype.constructor = Directory;
         }, cb);
     };
 
+    this.delDir00 = function (path, cb) {
+        var path = new Path(path);
+        var dirinst = this;
+        this.atomic(function (done) {
+            dirinst.traverse(this, path, function (err, dir, dirkey, parent) {
+                if (err) {
+                    done(err);
+                } else {
+                    if (dir.subdirs.hasOwnProperty(path.nodes.slice(-1)[0])) {
+                        done("Already exists.");
+                    } else {
+                        var key = 'dir:' + uuid();
+                        this.put(key, {path: path.path, children: {}, subdirs: {}}, function (err) {
+                            dir.subdirs[path.nodes.slice(-1)[0]] = key;
+                            this.put(dirkey, dir, function (err) {
+                                done(err, key);
+                            });
+                        }.bind(this));
+                    }
+                }
+            }.bind(this));
+        }, function (err, key) {
+            cb(err, key);
+        });
+    };
+
     this.makeDir = function(path, cb) {
         var path = new Path(path);
         var dirinst = this;
@@ -132,9 +161,6 @@ Directory.prototype.constructor = Directory;
     };
 
     this.objExists = function(path, type, cb) {
-    };
-
-    this.rmdir = function(path, cb) {
     };
 
     /*
@@ -226,12 +252,44 @@ Directory.prototype.constructor = Directory;
                     }
                     this.put(dirkey, dir, function (err) {
                         this.put(key, data, function (err) {
-                            done(false, key);
+                            console.log("PUT ERROR", err);
+                            done(err, key);
                         });
                     }.bind(this));
                 }
             }.bind(this));
         }, cb);
+    };
+
+    this.del = function (path, type, name, cb) {
+        var path = new Path(path);
+        var dirinst = this;
+        this.atomic(function (done) {
+            dirinst.traverse(this, path, function (err, dir, dirkey) {
+                console.log(dir);
+                var key;
+                if (err || !dir) {
+                    done("Directory not found.");
+                } else {
+                    if (!dir.children.hasOwnProperty(type) || !dir.children[type].hasOwnProperty(name)) {
+                        done("Object not found.");
+                    } else {
+                        key = dir.children[type][name];
+                        this.del(key, function (err) {
+                            if (!err) {
+                                delete dir.children[type][name];
+                                this.put(dirkey, dir, function (err, result) {
+                                    done(err);
+                                });
+                            } else {
+                                done(err);
+                            }
+                        }.bind(this));
+                    }
+                }
+            }.bind(this));
+        }, cb);
+
     };
 
 
